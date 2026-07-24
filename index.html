@@ -173,6 +173,7 @@
     <button data-view="sessoes" class="nav-btn">📸 Sessões</button>
     <button data-view="clientes" class="nav-btn">👥 Clientes</button>
     <button data-view="bras" class="nav-btn">🌙 Idas ao Brás</button>
+    <button data-view="custos" class="nav-btn">⛽ Custos Extras</button>
     <button data-view="financeiro" class="nav-btn">💰 Financeiro</button>
     <button data-view="config" class="nav-btn">⚙️ Configurações</button>
     <div class="side-footer">
@@ -202,6 +203,7 @@
   <button data-view="sessoes" class="nav-btn"><span>📸</span>Sessões<span class="dot"></span></button>
   <button data-view="clientes" class="nav-btn"><span>👥</span>Clientes<span class="dot"></span></button>
   <button data-view="bras" class="nav-btn"><span>🌙</span>Brás<span class="dot"></span></button>
+  <button data-view="custos" class="nav-btn"><span>⛽</span>Custos<span class="dot"></span></button>
   <button data-view="financeiro" class="nav-btn"><span>💰</span>Financ.<span class="dot"></span></button>
 </div>
 
@@ -233,6 +235,7 @@ const db = firebase.firestore();
 let clientes = [];
 let sessoes = [];
 let idasBras = [];
+let custosExtras = [];
 let currentView = 'dashboard';
 let currentMonth = new Date().toISOString().slice(0,7); // YYYY-MM
 
@@ -283,6 +286,10 @@ function ligarListeners(){
     idasBras = snap.docs.map(d=>({id:d.id, ...d.data()}));
     render();
   });
+  db.collection('custosExtras').orderBy('data','desc').onSnapshot(snap=>{
+    custosExtras = snap.docs.map(d=>({id:d.id, ...d.data()}));
+    render();
+  });
 }
 
 /* =========================================================
@@ -293,6 +300,7 @@ const titles = {
   sessoes: ['Sessões','Registro de looks, pacotes e reels'],
   clientes: ['Clientes','Cadastro e pastas do Drive'],
   bras: ['Idas ao Brás','Custo fixo — segunda e terça de madrugada'],
+  custos: ['Custos Extras','Gasolina, pedágio, estacionamento e outros gastos das idas'],
   financeiro: ['Financeiro','Pagamentos, pendências e recebimentos'],
   config: ['Configurações','Drive, backup e ajustes do sistema']
 };
@@ -320,6 +328,9 @@ function sessoesDoMes(){
 function idasDoMes(){
   return idasBras.filter(i=> (i.data||'').slice(0,7) === currentMonth);
 }
+function custosDoMes(){
+  return custosExtras.filter(c=> (c.data||'').slice(0,7) === currentMonth);
+}
 
 /* =========================================================
    RENDER PRINCIPAL
@@ -330,6 +341,7 @@ function render(){
   if(currentView==='sessoes') root.innerHTML = renderSessoes();
   if(currentView==='clientes') root.innerHTML = renderClientes();
   if(currentView==='bras') root.innerHTML = renderBras();
+  if(currentView==='custos') root.innerHTML = renderCustos();
   if(currentView==='financeiro') root.innerHTML = renderFinanceiro();
   if(currentView==='config') root.innerHTML = renderConfig();
   bindDynamicEvents();
@@ -339,10 +351,12 @@ function render(){
 function renderDashboard(){
   const sm = sessoesDoMes();
   const im = idasDoMes();
+  const cm = custosDoMes();
   const faturamento = sm.reduce((a,s)=>a+(s.valorTotal||0),0);
   const repasseIrma = sm.reduce((a,s)=>a+(s.repasseTotal||0),0);
   const custoBras = im.length * VALOR_IDA_BRAS;
-  const lucro = faturamento - repasseIrma - custoBras;
+  const custoExtra = cm.reduce((a,c)=>a+(c.valor||0),0);
+  const lucro = faturamento - repasseIrma - custoBras - custoExtra;
   const pendentes = sm.filter(s=>s.statusPagamento!=='pago');
   const emAberto = pendentes.reduce((a,s)=>a+(s.valorTotal||0),0);
 
@@ -362,6 +376,7 @@ function renderDashboard(){
       <div class="card wine"><div class="label">Faturamento do mês</div><div class="value">${fmt(faturamento)}</div></div>
       <div class="card"><div class="label">Repasse à irmã (looks)</div><div class="value">${fmt(repasseIrma)}</div></div>
       <div class="card"><div class="label">Custo fixo — Idas ao Brás</div><div class="value">${fmt(custoBras)}</div></div>
+      <div class="card"><div class="label">Custos extras (gasolina, pedágio...)</div><div class="value">${fmt(custoExtra)}</div></div>
       <div class="card ${lucro < 0 ? 'danger' : 'ok'}"><div class="label">Lucro líquido</div><div class="value" style="color:${lucro < 0 ? 'var(--danger)' : 'var(--ok)'}">${fmt(lucro)}</div></div>
       <div class="card warn"><div class="label">Em aberto (${pendentes.length} sessões)</div><div class="value">${fmt(emAberto)}</div></div>
     </div>
@@ -660,6 +675,70 @@ function excluirCliente(id){
   if(confirm('Excluir esse cliente? Sessões já lançadas não serão apagadas.')){
     db.collection('clientes').doc(id).delete().then(fecharModal);
   }
+}
+
+/* ---------- CUSTOS EXTRAS ---------- */
+function categoriaLabel(c){
+  return {gasolina:'⛽ Gasolina', pedagio:'🛣️ Pedágio', estacionamento:'🅿️ Estacionamento', outro:'📌 Outro'}[c] || c;
+}
+function renderCustos(){
+  const cm = custosDoMes();
+  const total = cm.reduce((a,c)=>a+(c.valor||0),0);
+  return `
+    <div class="cards">
+      <div class="card"><div class="label">Lançamentos no mês</div><div class="value">${cm.length}</div></div>
+      <div class="card wine"><div class="label">Total gasto no mês</div><div class="value">${fmt(total)}</div></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h3>Custos extras</h3><button class="btn" onclick="abrirNovoCusto()">+ Novo custo</button></div>
+      ${cm.length ? `
+        <table>
+          <tr><th>Data</th><th>Categoria</th><th>Observação</th><th>Valor</th><th></th></tr>
+          ${cm.map(c=>`
+            <tr>
+              <td>${fmtData(c.data)}</td>
+              <td>${categoriaLabel(c.categoria)}</td>
+              <td>${c.observacao||'-'}</td>
+              <td>${fmt(c.valor)}</td>
+              <td><button class="btn ghost small" onclick="excluirCusto('${c.id}')">Excluir</button></td>
+            </tr>`).join('')}
+        </table>
+      ` : `<div class="empty"><div class="serif">Nenhum custo lançado esse mês</div>Registre gasolina, pedágio, estacionamento ou outro gasto das idas.</div>`}
+    </div>
+  `;
+}
+function abrirNovoCusto(){
+  document.getElementById('modalBody').innerHTML = `
+    <h3>Novo custo extra</h3>
+    <div class="field">
+      <label>Categoria</label>
+      <select id="cx_categoria">
+        <option value="gasolina">Gasolina</option>
+        <option value="pedagio">Pedágio</option>
+        <option value="estacionamento">Estacionamento</option>
+        <option value="outro">Outro</option>
+      </select>
+    </div>
+    <div class="field"><label>Data</label><input type="date" id="cx_data" value="${new Date().toISOString().slice(0,10)}"></div>
+    <div class="field"><label>Valor (R$)</label><input type="number" id="cx_valor" min="0" step="0.01" placeholder="0,00"></div>
+    <div class="field"><label>Observação (opcional)</label><input type="text" id="cx_obs" placeholder="ex: ida de terça"></div>
+    <div class="modal-actions">
+      <button class="btn ghost" onclick="fecharModal()">Cancelar</button>
+      <button class="btn" onclick="salvarCusto()">Salvar</button>
+    </div>
+  `;
+  abrirModal();
+}
+function salvarCusto(){
+  const categoria = document.getElementById('cx_categoria').value;
+  const data = document.getElementById('cx_data').value;
+  const valor = Number(document.getElementById('cx_valor').value)||0;
+  const observacao = document.getElementById('cx_obs').value.trim();
+  if(valor<=0){ alert('Informe um valor maior que zero.'); return; }
+  db.collection('custosExtras').add({categoria, data, valor, observacao}).then(fecharModal);
+}
+function excluirCusto(id){
+  if(confirm('Excluir esse custo?')) db.collection('custosExtras').doc(id).delete();
 }
 
 /* ---------- IDAS AO BRÁS ---------- */
