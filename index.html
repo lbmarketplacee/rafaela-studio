@@ -470,7 +470,68 @@ const firebaseConfig = {
   messagingSenderId: "381295329554",
   appId: "1:381295329554:web:f1f265db68f982fe9133cb"
 };
-const GOOGLE_CLIENT_ID = "SUA_CHAVE_AQUI"; // preencher quando a conta do Drive for definida
+const GOOGLE_CLIENT_ID = "882014387327-96tage18m34cmtgor9la3hupht0fno3b.apps.googleusercontent.com";
+const DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.file";
+let driveAccessToken = null;
+let driveTokenClient = null;
+
+function initDriveTokenClient(){
+  if(!window.google || !google.accounts || !google.accounts.oauth2) return false;
+  if(driveTokenClient) return true;
+  driveTokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: DRIVE_SCOPE,
+    callback: (resp)=>{
+      if(resp && resp.access_token){
+        driveAccessToken = resp.access_token;
+        localStorage.setItem('driveWasConnected','1');
+        render();
+      }
+    }
+  });
+  return true;
+}
+
+function conectarDrive(){
+  if(!initDriveTokenClient()){
+    alert('O Google ainda está carregando, espera 1 segundo e tenta de novo.');
+    return;
+  }
+  driveTokenClient.requestAccessToken({prompt: 'consent'});
+}
+
+function driveConectado(){ return !!driveAccessToken; }
+
+function tentarReconectarDriveSilencioso(){
+  if(localStorage.getItem('driveWasConnected')==='1'){
+    setTimeout(()=>{
+      if(initDriveTokenClient()){
+        try{ driveTokenClient.requestAccessToken({prompt:''}); }catch(e){}
+      }
+    }, 800);
+  }
+}
+
+async function criarPastaDrive(nome, parentId){
+  if(!driveAccessToken) throw new Error('Drive não conectado');
+  const metadata = { name: nome, mimeType: 'application/vnd.google-apps.folder' };
+  if(parentId) metadata.parents = [parentId];
+  const res = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method:'POST',
+    headers: { 'Authorization': 'Bearer ' + driveAccessToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify(metadata)
+  });
+  const data = await res.json();
+  if(!data.id) throw new Error((data.error && data.error.message) || 'Erro ao criar pasta no Drive');
+  try{
+    await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+      method:'POST',
+      headers: {'Authorization':'Bearer '+driveAccessToken,'Content-Type':'application/json'},
+      body: JSON.stringify({role:'reader', type:'anyone'})
+    });
+  }catch(e){}
+  return { id: data.id, link: `https://drive.google.com/drive/folders/${data.id}` };
+}
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
@@ -635,7 +696,7 @@ function renderDashboard(){
             <tr>
               <td>${fmtData(s.data)}</td>
               <td>${s.clienteNome}</td>
-              <td>${(s.itens||[]).map(i=>tipoLabel(i.tipo)+' x'+i.quantidade).join(', ')}</td>
+              <td>${(s.itens||[]).map(i=>tipoLabel(i.tipo)+' x'+i.quantidade).join(', ')} ${s.sessionDriveLink ? `<a href="${s.sessionDriveLink}" target="_blank" title="Abrir pasta da sessão">📁</a>` : ''}</td>
               <td>${fmt(s.valorTotal)}</td>
               <td>${fmt(s.repasseTotal)}</td>
               <td>${statusTag(s.statusPagamento)}</td>
@@ -673,7 +734,7 @@ function renderSessoes(){
             <tr>
               <td>${fmtData(s.data)}</td>
               <td>${s.clienteNome}</td>
-              <td>${(s.itens||[]).map(i=>tipoLabel(i.tipo)+' x'+i.quantidade).join('<br>')}</td>
+              <td>${(s.itens||[]).map(i=>tipoLabel(i.tipo)+' x'+i.quantidade).join('<br>')} ${s.sessionDriveLink ? `<br><a href="${s.sessionDriveLink}" target="_blank" title="Abrir pasta da sessão">📁 pasta</a>` : ''}</td>
               <td>${s.irmaParticipou ? 'Sim' : 'Não'}</td>
               <td>${fmt(s.valorTotal)}</td>
               <td>${fmt(s.repasseTotal)}</td>
@@ -841,11 +902,41 @@ function salvarSessao(){
 
   const payload = {clienteId, clienteNome, data, itens, valorTotal, repasseTotal, irmaParticipou, statusPagamento, formaPagamento};
 
+  const isNova = !editingSessionId;
   const promise = editingSessionId
     ? db.collection('sessoes').doc(editingSessionId).update(payload)
     : db.collection('sessoes').add(payload);
 
-  promise.then(()=>fecharModal()).catch(err=>alert('Erro ao salvar: '+err.message));
+  promise.then((ref)=>{
+    fecharModal();
+    const sessaoId = isNova ? ref.id : editingSessionId;
+    criarSubpastaSessao(sessaoId, clienteId, data);
+  }).catch(err=>alert('Erro ao salvar: '+err.message));
+}
+
+function extrairFolderId(link){
+  if(!link) return null;
+  const m = link.match(/folders\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+function getClienteFolderId(clienteId){
+  const c = clientes.find(x=>x.id===clienteId);
+  if(!c) return null;
+  return c.driveFolderId || extrairFolderId(c.driveFolderLink);
+}
+function fmtDataPasta(d){
+  if(!d) return 'sessao';
+  const [y,m,day] = d.split('-');
+  return `${day}-${m}-${y}`;
+}
+async function criarSubpastaSessao(sessaoId, clienteId, data){
+  if(!driveConectado()) return;
+  const parentId = getClienteFolderId(clienteId);
+  if(!parentId) return;
+  try{
+    const pasta = await criarPastaDrive(fmtDataPasta(data), parentId);
+    await db.collection('sessoes').doc(sessaoId).update({sessionDriveLink: pasta.link});
+  }catch(e){ console.error('Erro ao criar subpasta da sessão:', e); }
 }
 
 function excluirSessao(id){
@@ -863,6 +954,16 @@ function whatsappLink(telefone){
   if(!digitos) return null;
   const comDDI = digitos.startsWith('55') ? digitos : '55'+digitos;
   return `https://wa.me/${comDDI}`;
+}
+
+async function criarPastaParaCliente(clienteId, nome){
+  if(!driveConectado()){ alert('Conecta o Google Drive primeiro, na tela de Configurações.'); return; }
+  try{
+    const pasta = await criarPastaDrive(nome);
+    await db.collection('clientes').doc(clienteId).update({driveFolderId: pasta.id, driveFolderLink: pasta.link});
+  }catch(e){
+    alert('Erro ao criar pasta no Drive: '+e.message);
+  }
 }
 
 function filtrarClientes(){
@@ -894,7 +995,7 @@ function clientesTableHTML(){
               </svg>
             </a>` : ''}
           </td>
-          <td>${c.driveFolderLink ? `<a class="drivebtn" href="${c.driveFolderLink}" target="_blank">📁 Abrir pasta</a>` : '<span style="color:var(--muted)">sem pasta ainda</span>'}</td>
+          <td>${c.driveFolderLink ? `<a class="drivebtn" href="${c.driveFolderLink}" target="_blank">📁 Abrir pasta</a>` : (driveConectado() ? `<button class="btn ghost small" onclick="criarPastaParaCliente('${c.id}','${(c.nome||'').replace(/'/g,"\\'")}')">+ Criar pasta</button>` : '<span style="color:var(--muted)">conecte o Drive</span>')}</td>
           <td><button class="btn ghost small" onclick="editarCliente('${c.id}')">Editar</button></td>
         </tr>`;
       }).join('')}
@@ -945,6 +1046,7 @@ function abrirModalCliente(){
 function salvarCliente(){
   const nome = document.getElementById('c_nome').value.trim();
   if(!nome){ alert('Informe o nome do cliente.'); return; }
+  const isNovo = !editingClientId;
   const payload = {
     nome,
     telefone: document.getElementById('c_telefone').value.trim(),
@@ -953,7 +1055,16 @@ function salvarCliente(){
   const promise = editingClientId
     ? db.collection('clientes').doc(editingClientId).update(payload)
     : db.collection('clientes').add(payload);
-  promise.then(fecharModal).catch(err=>alert('Erro: '+err.message));
+
+  promise.then(async (ref)=>{
+    fecharModal();
+    if(isNovo && driveConectado() && !payload.driveFolderLink){
+      try{
+        const pasta = await criarPastaDrive(nome);
+        await db.collection('clientes').doc(ref.id).update({driveFolderId: pasta.id, driveFolderLink: pasta.link});
+      }catch(e){ console.error('Erro ao criar pasta automática:', e); }
+    }
+  }).catch(err=>alert('Erro: '+err.message));
 }
 function excluirCliente(id){
   if(confirm('Excluir esse cliente? Sessões já lançadas não serão apagadas.')){
@@ -1127,14 +1238,14 @@ function renderConfig(){
     <div class="panel">
       <h3>Integração com Google Drive</h3>
       <p style="color:var(--muted);font-size:13.5px;line-height:1.6;">
-        Por enquanto, cada cliente tem um campo de <b>link de pasta</b> que você cola manualmente
-        (crie a pasta uma vez no Drive da Rafaela e compartilhe o link ali no cadastro do cliente).
-        Quando vocês decidirem qual conta Google vai autorizar, dá pra ativar a criação automática de pastas —
-        é só configurar o Client ID abaixo no código (variável <code>GOOGLE_CLIENT_ID</code>).
+        Conectando o Drive, toda vez que você cadastrar um cliente novo (ou clicar em "Criar pasta" na lista de clientes),
+        o sistema cria automaticamente uma pasta com o nome dele no Drive e já deixa o link salvo no cadastro.
       </p>
-      <div class="field">
-        <label>Client ID configurado atualmente</label>
-        <input type="text" value="${GOOGLE_CLIENT_ID}" disabled>
+      <div style="display:flex;align-items:center;gap:14px;margin-top:14px;">
+        ${driveConectado()
+          ? `<span class="tag pago">✅ Drive conectado</span>`
+          : `<button class="btn" onclick="conectarDrive()">🔗 Conectar Google Drive</button>`
+        }
       </div>
     </div>
     <div class="panel">
@@ -1170,6 +1281,7 @@ document.head.appendChild(styleTag);
 
 ligarListeners();
 render();
+tentarReconectarDriveSilencioso();
 </script>
 </body>
 </html>
