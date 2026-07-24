@@ -853,22 +853,57 @@ function excluirSessao(id){
 }
 
 /* ---------- CLIENTES ---------- */
+let clienteBusca = '';
+
+function whatsappLink(telefone){
+  if(!telefone) return null;
+  const digitos = telefone.replace(/\D/g,'');
+  if(!digitos) return null;
+  const comDDI = digitos.startsWith('55') ? digitos : '55'+digitos;
+  return `https://wa.me/${comDDI}`;
+}
+
+function filtrarClientes(){
+  clienteBusca = document.getElementById('buscaCliente').value;
+  renderClientListOnly();
+}
+function renderClientListOnly(){
+  document.getElementById('clientesTableWrap').innerHTML = clientesTableHTML();
+}
+function clientesTableHTML(){
+  const termo = (clienteBusca||'').toLowerCase().trim();
+  const lista = termo ? clientes.filter(c=>(c.nome||'').toLowerCase().includes(termo)) : clientes;
+  if(!lista.length){
+    return `<div class="empty"><div class="serif">${termo ? 'Nenhum cliente encontrado' : 'Nenhum cliente cadastrado'}</div>${termo ? 'Tenta buscar por outro nome.' : 'Cadastre o primeiro cliente fixo da Rafaela.'}</div>`;
+  }
+  return `
+    <table>
+      <tr><th>Nome</th><th>Telefone</th><th>Pasta no Drive</th><th></th></tr>
+      ${lista.map(c=>{
+        const wa = whatsappLink(c.telefone);
+        return `
+        <tr>
+          <td>${c.nome}</td>
+          <td>
+            ${c.telefone||'-'}
+            ${wa ? `<a href="${wa}" target="_blank" title="Abrir WhatsApp" style="margin-left:8px;text-decoration:none;">🟢</a>` : ''}
+          </td>
+          <td>${c.driveFolderLink ? `<a class="drivebtn" href="${c.driveFolderLink}" target="_blank">📁 Abrir pasta</a>` : '<span style="color:var(--muted)">sem pasta ainda</span>'}</td>
+          <td><button class="btn ghost small" onclick="editarCliente('${c.id}')">Editar</button></td>
+        </tr>`;
+      }).join('')}
+    </table>
+  `;
+}
+
 function renderClientes(){
   return `
     <div class="panel">
       <div class="panel-head"><h3>Clientes cadastrados</h3><button class="btn" onclick="abrirNovoCliente()">+ Novo cliente</button></div>
-      ${clientes.length ? `
-        <table>
-          <tr><th>Nome</th><th>Telefone</th><th>Pasta no Drive</th><th></th></tr>
-          ${clientes.map(c=>`
-            <tr>
-              <td>${c.nome}</td>
-              <td>${c.telefone||'-'}</td>
-              <td>${c.driveFolderLink ? `<a class="drivebtn" href="${c.driveFolderLink}" target="_blank">📁 Abrir pasta</a>` : '<span style="color:var(--muted)">sem pasta ainda</span>'}</td>
-              <td><button class="btn ghost small" onclick="editarCliente('${c.id}')">Editar</button></td>
-            </tr>`).join('')}
-        </table>
-      ` : `<div class="empty"><div class="serif">Nenhum cliente cadastrado</div>Cadastre o primeiro cliente fixo da Rafaela.</div>`}
+      <div class="field" style="max-width:340px;">
+        <input type="text" id="buscaCliente" placeholder="🔎 Buscar cliente por nome..." value="${clienteBusca}" oninput="filtrarClientes()">
+      </div>
+      <div id="clientesTableWrap">${clientesTableHTML()}</div>
     </div>
   `;
 }
@@ -1122,11 +1157,9 @@ function bindDynamicEvents(){}
    INÍCIO
    ========================================================= */
 
-document.querySelector('.side-footer img, .avatar-img').src = 'data:image/jpeg;base64,' + AVATAR_IMG_B64;
-document.body.style.setProperty('--bg-image', 'url(data:image/jpeg;base64,' + BG_IMG_B64 + ')');
-document.styleSheets;
-const styleTag = document.createElement('style');
-styleTag.textContent = 'body::before{ background-image: url("data:image/jpeg;base64,' + BG_IMG_B64 + '") !important; }';
+document.querySelector(".side-footer img, .avatar-img").src = "data:image/jpeg;base64," + AVATAR_IMG_B64;
+const styleTag = document.createElement("style");
+styleTag.textContent = "body::before{ background-image: url(\"data:image/jpeg;base64," + BG_IMG_B64 + "\") !important; }";
 document.head.appendChild(styleTag);
 
 ligarListeners();
