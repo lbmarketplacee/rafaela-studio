@@ -31,7 +31,15 @@
     --shadow: 0 2px 10px rgba(33,29,27,0.06), 0 1px 2px rgba(33,29,27,0.04);
   }
   *{box-sizing:border-box;}
-  body{margin:0;background:var(--paper);color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;}
+  body{margin:0;color:var(--ink);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased;background:var(--paper);}
+  body::before{
+    content:'';position:fixed;inset:0;z-index:-2;
+    background:url('rafaela-bg.jpg') center 20%/cover no-repeat;
+  }
+  body::after{
+    content:'';position:fixed;inset:0;z-index:-1;
+    background:linear-gradient(180deg, rgba(250,246,241,0.55) 0%, rgba(250,246,241,0.85) 55%, rgba(250,246,241,0.96) 100%);
+  }
   h1,h2,h3,.serif{font-family:'Playfair Display',serif;}
   button{font-family:'Inter',sans-serif;cursor:pointer;}
   input,select,textarea{font-family:'Inter',sans-serif;}
@@ -354,7 +362,7 @@ function renderDashboard(){
       <div class="card wine"><div class="label">Faturamento do mês</div><div class="value">${fmt(faturamento)}</div></div>
       <div class="card"><div class="label">Repasse à irmã (looks)</div><div class="value">${fmt(repasseIrma)}</div></div>
       <div class="card"><div class="label">Custo fixo — Idas ao Brás</div><div class="value">${fmt(custoBras)}</div></div>
-      <div class="card ok"><div class="label">Lucro líquido</div><div class="value">${fmt(lucro)}</div></div>
+      <div class="card ${lucro < 0 ? 'danger' : 'ok'}"><div class="label">Lucro líquido</div><div class="value" style="color:${lucro < 0 ? 'var(--danger)' : 'var(--ok)'}">${fmt(lucro)}</div></div>
       <div class="card warn"><div class="label">Em aberto (${pendentes.length} sessões)</div><div class="value">${fmt(emAberto)}</div></div>
     </div>
 
