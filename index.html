@@ -547,6 +547,7 @@ let currentView = 'dashboard';
 let currentMonth = new Date().toISOString().slice(0,7); // YYYY-MM
 
 const PRECO_LOOK = 35;
+const PRECO_LOOK_EXTERNO = 40;
 const PRECO_PACOTE3 = 100;
 const PRECO_REELS = 60;
 const REPASSE_POR_LOOK = 5;
@@ -565,6 +566,9 @@ function calcularItem(tipo, qtd){
     const grupos = Math.floor(qtd/3);
     const resto = qtd%3;
     valor = grupos*PRECO_PACOTE3 + resto*PRECO_LOOK;
+    repasse = qtd * REPASSE_POR_LOOK;
+  } else if(tipo === 'externo'){
+    valor = qtd * PRECO_LOOK_EXTERNO;
     repasse = qtd * REPASSE_POR_LOOK;
   } else if(tipo === 'reels'){
     valor = qtd * PRECO_REELS;
@@ -708,7 +712,7 @@ function renderDashboard(){
 }
 
 function tipoLabel(t){
-  return {avulso:'Look avulso', pacote3:'Pacote 3x', reels:'Reels'}[t] || t;
+  return {avulso:'Look avulso', pacote3:'Pacote 3x', externo:'Look externo', reels:'Reels'}[t] || t;
 }
 function fmtData(d){
   if(!d) return '-';
@@ -750,6 +754,42 @@ function renderSessoes(){
 let itemCount = 0;
 let editingSessionId = null;
 
+function mostrarNovoClienteInline(){
+  const div = document.getElementById('novoClienteInline');
+  const isShowing = div.style.display === 'block';
+  div.style.display = isShowing ? 'none' : 'block';
+  if(!isShowing){ document.getElementById('nci_nome').focus(); }
+}
+
+async function salvarClienteInlineNaSessao(){
+  const nome = document.getElementById('nci_nome').value.trim();
+  if(!nome){ alert('Informe o nome do cliente.'); return; }
+  const telefone = document.getElementById('nci_telefone').value.trim();
+  try{
+    const ref = await db.collection('clientes').add({nome, telefone, driveFolderLink:''});
+    // adiciona localmente sem esperar o listener, pra não perder o preenchimento da sessão em andamento
+    clientes.push({id: ref.id, nome, telefone, driveFolderLink:''});
+    const select = document.getElementById('f_cliente');
+    const opt = document.createElement('option');
+    opt.value = ref.id;
+    opt.dataset.nome = nome;
+    opt.textContent = nome;
+    opt.selected = true;
+    select.appendChild(opt);
+    document.getElementById('nci_nome').value = '';
+    document.getElementById('nci_telefone').value = '';
+    mostrarNovoClienteInline();
+    if(driveConectado()){
+      try{
+        const pasta = await criarPastaDrive(nome);
+        await db.collection('clientes').doc(ref.id).update({driveFolderId: pasta.id, driveFolderLink: pasta.link});
+      }catch(e){ console.error('Erro ao criar pasta automática:', e); }
+    }
+  }catch(e){
+    alert('Erro ao cadastrar cliente: '+e.message);
+  }
+}
+
 function abrirNovaSessao(){
   editingSessionId = null;
   itemCount = 0;
@@ -769,10 +809,21 @@ function abrirModalSessao(){
     <h3>${s ? 'Editar sessão' : 'Nova sessão'}</h3>
     <div class="field">
       <label>Cliente</label>
-      <select id="f_cliente">
-        <option value="">Selecione...</option>
-        ${clientes.map(c=>`<option value="${c.id}" data-nome="${c.nome}" ${s && s.clienteId===c.id ? 'selected':''}>${c.nome}</option>`).join('')}
-      </select>
+      <div style="display:flex;gap:8px;">
+        <select id="f_cliente" style="flex:1;">
+          <option value="">Selecione...</option>
+          ${clientes.map(c=>`<option value="${c.id}" data-nome="${c.nome}" ${s && s.clienteId===c.id ? 'selected':''}>${c.nome}</option>`).join('')}
+        </select>
+        <button type="button" class="btn ghost small" onclick="mostrarNovoClienteInline()">+ Novo</button>
+      </div>
+      <div id="novoClienteInline" style="display:none;background:var(--blush);padding:12px;border-radius:10px;margin-top:8px;">
+        <div class="field" style="margin-bottom:8px;"><label>Nome do cliente</label><input type="text" id="nci_nome" placeholder="Nome do novo cliente"></div>
+        <div class="field" style="margin-bottom:8px;"><label>Telefone (opcional)</label><input type="tel" id="nci_telefone" placeholder="WhatsApp"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button type="button" class="btn ghost small" onclick="mostrarNovoClienteInline()">Cancelar</button>
+          <button type="button" class="btn small" onclick="salvarClienteInlineNaSessao()">Salvar cliente</button>
+        </div>
+      </div>
     </div>
     <div class="field">
       <label>Data</label>
@@ -834,6 +885,7 @@ function addItemRow(existente){
       <select class="item-tipo" onchange="atualizarTotalSessao()">
         <option value="avulso" ${tipo==='avulso'?'selected':''}>Look avulso (R$35)</option>
         <option value="pacote3" ${tipo==='pacote3'?'selected':''}>Pacote 3 looks (R$100/grupo)</option>
+        <option value="externo" ${tipo==='externo'?'selected':''}>Look externo (R$40)</option>
         <option value="reels" ${tipo==='reels'?'selected':''}>Reels (R$60)</option>
       </select>
     </div>
